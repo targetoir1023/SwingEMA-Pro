@@ -1,0 +1,128 @@
+//@version=5
+// Copyright © 2025 Bitter_Conclusion_65
+indicator("EMA & Swing High/Low with Entries&TP/Exit", overlay=true, max_labels_count=500, max_boxes_count=500)
+
+// === Inputs === //
+left       = input.int(14, "Swing Left", minval=14)
+right      = input.int(14, "Swing Right", minval=14)
+rayLength  = input.int(10, "Ray Length", minval=10)
+
+fastLen    = input.int(20, "Fast EMA", minval=1)
+slowLen    = input.int(50, "Slow EMA", minval=1)
+
+riskReward = input.float(3.0, "Risk-Reward Ratio", step=0.1)
+showSwings = input.bool(true, "Show Swing High/Low Lines")
+
+startYear  = input.int(2025, "Start Year")
+startMonth = input.int(1, "Start Month", minval=1, maxval=12)
+startDay   = input.int(1, "Start Day", minval=1, maxval=31)
+
+endYear    = input.int(2025, "End Year")
+endMonth   = input.int(12, "End Month", minval=1, maxval=12)
+endDay     = input.int(31, "End Day", minval=1, maxval=31)
+
+// === Inputs End === //
+
+startDate = timestamp(startYear, startMonth, startDay, 0, 0)
+endDate   = timestamp(endYear, endMonth, endDay, 23, 59)
+inDate    = (time >= startDate) and (time <= endDate)
+
+fastEMA = ta.ema(close, fastLen)
+slowEMA = ta.ema(close, slowLen)
+
+bullTrend = ta.crossover(fastEMA, slowEMA)
+bearTrend = ta.crossunder(fastEMA, slowEMA)
+
+plot(fastEMA, color=color.teal, title="Fast EMA")
+plot(slowEMA, color=color.orange, title="Slow EMA")
+
+swingHigh = ta.pivothigh(high, left, right)
+swingLow  = ta.pivotlow(low, left, right)
+
+var swingHighLines = array.new_line()
+var swingLowLines  = array.new_line()
+
+lastSwingHigh = ta.valuewhen(not na(swingHigh), swingHigh, 0)
+lastSwingLow  = ta.valuewhen(not na(swingLow), swingLow, 0)
+if showSwings 
+    if not na(swingHigh) 
+        l = line.new(bar_index - right, swingHigh, bar_index - right + rayLength, swingHigh, color=color.rgb(50, 50, 50), width=2) 
+        array.push(swingHighLines, l) 
+    if not na(swingLow) 
+        l = line.new(bar_index - right, swingLow, bar_index - right + rayLength, swingLow, color=color.rgb(50, 50, 50), width=2) 
+        array.push(swingLowLines, l)
+longEntryCond  = inDate and not na(lastSwingHigh) and bullTrend and close > lastSwingHigh
+shortEntryCond = inDate and not na(lastSwingLow)  and bearTrend  and close < lastSwingLow
+
+plotshape(longEntryCond,  title="Long Entry Dot",  style=shape.circle, location=location.belowbar, color=color.green, size=size.tiny)
+plotshape(shortEntryCond, title="Short Entry Dot", style=shape.circle, location=location.abovebar, color=color.red,   size=size.tiny)
+
+var rrBoxes = array.new_box()
+var int   lastSide    = 0
+var float entryPrice  = na
+var float stopPrice   = na
+var float target      = na
+var float risk        = na
+
+if longEntryCond
+    entryPrice := close
+    stopPrice  := lastSwingLow
+    if not na(stopPrice) and entryPrice > stopPrice
+        risk    := entryPrice - stopPrice
+        target  := entryPrice + (risk * riskReward)
+
+        riskBox   = box.new(bar_index, entryPrice, bar_index+10, stopPrice,  bgcolor=color.new(color.red, 85),   border_color=color.red)
+        rewardBox = box.new(bar_index, target,     bar_index+10, entryPrice, bgcolor=color.new(color.green, 85), border_color=color.green)
+        array.push(rrBoxes, riskBox)
+        array.push(rrBoxes, rewardBox)
+
+        lastSide := 1
+
+if shortEntryCond
+    entryPrice := close
+    stopPrice  := lastSwingHigh
+    if not na(stopPrice) and stopPrice > entryPrice
+        risk    := stopPrice - entryPrice
+        target  := entryPrice - (risk * riskReward)
+
+        riskBox   = box.new(bar_index, stopPrice,  bar_index+10, entryPrice, bgcolor=color.new(color.red, 85),   border_color=color.red)
+        rewardBox = box.new(bar_index, entryPrice, bar_index+10, target,     bgcolor=color.new(color.green, 85), border_color=color.green)
+        array.push(rrBoxes, riskBox)
+        array.push(rrBoxes, rewardBox)
+
+        lastSide := -1
+
+if lastSide == 1 and not na(entryPrice) and not na(stopPrice) and not na(target)
+
+    if array.size(rrBoxes) >= 2
+        riskBox   = array.get(rrBoxes, array.size(rrBoxes) - 2)
+        rewardBox = array.get(rrBoxes, array.size(rrBoxes) - 1)
+        box.set_right(riskBox, bar_index)
+        box.set_right(rewardBox, bar_index)
+
+    if high >= target
+        label.new(bar_index, target, "✅ Long TP", color=color.green, textcolor=color.white, style=label.style_label_down, size=size.small)
+        lastSide   := 0
+        entryPrice := na
+    else if low <= stopPrice
+        label.new(bar_index, stopPrice, "❌ Long Exit", color=color.red, textcolor=color.white, style=label.style_label_up, size=size.small)
+        lastSide   := 0
+        entryPrice := na
+
+if lastSide == -1 and not na(entryPrice) and not na(stopPrice) and not na(target)
+    // Extend right side every bar
+    if array.size(rrBoxes) >= 2
+        riskBox   = array.get(rrBoxes, array.size(rrBoxes) - 2)
+        rewardBox = array.get(rrBoxes, array.size(rrBoxes) - 1)
+        box.set_right(riskBox, bar_index)
+        box.set_right(rewardBox, bar_index)
+
+    if low <= target
+        label.new(bar_index, target, "✅ Short TP", color=color.red, textcolor=color.white, style=label.style_label_up, size=size.small)
+        lastSide   := 0
+        entryPrice := na
+    else if high >= stopPrice
+        label.new(bar_index, stopPrice, "❌ Short Exit", color=color.green, textcolor=color.white, style=label.style_label_down, size=size.small)
+        lastSide   := 0
+        entryPrice := na
+
